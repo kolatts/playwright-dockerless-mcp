@@ -80,6 +80,10 @@ public sealed class McpServer : IAsyncDisposable
         WriteIndented = false
     };
 
+    // Common description strings for tool definitions
+    private const string ElementDescription = "Human-readable element description used to obtain permission to interact with the element";
+    private const string RefDescription = "Exact target element reference from the page snapshot";
+
     private readonly string _browserType;
     private readonly bool _headless;
     private IPlaywright? _playwright;
@@ -328,11 +332,12 @@ public sealed class McpServer : IAsyncDisposable
     {
         await EnsureBrowserAsync();
 
-        // Note: Accessibility.SnapshotAsync is marked obsolete but still functional.
-        // Using pragma to suppress the warning as this is the standard API for snapshots.
-#pragma warning disable CS0612
+        // Note: IPage.Accessibility.SnapshotAsync is marked obsolete (CS0612 - Obsolete member).
+        // This API is still functional in Playwright 1.49 and is the standard way to get accessibility snapshots.
+        // When Playwright removes this API, migrate to the replacement API (if available) or use page.Locator().AriaSnapshot().
+#pragma warning disable CS0612 // Type or member is obsolete
         var snapshot = await _currentPage!.Accessibility.SnapshotAsync();
-#pragma warning restore CS0612
+#pragma warning restore CS0612 // Type or member is obsolete
         var url = _currentPage.Url;
         var title = await _currentPage.TitleAsync();
 
@@ -724,16 +729,7 @@ public sealed class McpServer : IAsyncDisposable
 
         return action.ToLowerInvariant() switch
         {
-            "list" => JsonSerializer.Serialize(new
-            {
-                tabs = pages.Select((p, i) => new
-                {
-                    index = i,
-                    url = p.Url,
-                    title = p.TitleAsync().GetAwaiter().GetResult(),
-                    isCurrent = p == _currentPage
-                }).ToList()
-            }, s_jsonOptions),
+            "list" => await ListTabsAsync(pages),
 
             "new" => await CreateNewTabAsync(),
 
@@ -743,6 +739,24 @@ public sealed class McpServer : IAsyncDisposable
 
             _ => throw new ArgumentException($"Unknown tab action: {action}")
         };
+    }
+
+    private async Task<string> ListTabsAsync(IReadOnlyList<IPage> pages)
+    {
+        var tabs = new List<object>();
+        for (int i = 0; i < pages.Count; i++)
+        {
+            var page = pages[i];
+            tabs.Add(new
+            {
+                index = i,
+                url = page.Url,
+                title = await page.TitleAsync(),
+                isCurrent = page == _currentPage
+            });
+        }
+
+        return JsonSerializer.Serialize(new { tabs }, s_jsonOptions);
     }
 
     private async Task<string> CreateNewTabAsync()
@@ -976,8 +990,8 @@ public sealed class McpServer : IAsyncDisposable
                     type = "object",
                     properties = new Dictionary<string, object>
                     {
-                        ["element"] = new { type = "string", description = "Human-readable element description used to obtain permission to interact with the element" },
-                        ["ref"] = new { type = "string", description = "Exact target element reference from the page snapshot" },
+                        ["element"] = new { type = "string", description = ElementDescription },
+                        ["ref"] = new { type = "string", description = RefDescription },
                         ["button"] = new { type = "string", description = "Button to click, defaults to left", @enum = new[] { "left", "right", "middle" } },
                         ["doubleClick"] = new { type = "boolean", description = "Whether to perform a double click instead of a single click" }
                     },
@@ -993,8 +1007,8 @@ public sealed class McpServer : IAsyncDisposable
                     type = "object",
                     properties = new Dictionary<string, object>
                     {
-                        ["element"] = new { type = "string", description = "Human-readable element description used to obtain permission to interact with the element" },
-                        ["ref"] = new { type = "string", description = "Exact target element reference from the page snapshot" },
+                        ["element"] = new { type = "string", description = ElementDescription },
+                        ["ref"] = new { type = "string", description = RefDescription },
                         ["text"] = new { type = "string", description = "Text to type into the element" },
                         ["slowly"] = new { type = "boolean", description = "Whether to type one character at a time. Useful for triggering key handlers in the page. By default entire text is filled in at once." },
                         ["submit"] = new { type = "boolean", description = "Whether to submit entered text (press Enter after)" }
@@ -1041,8 +1055,8 @@ public sealed class McpServer : IAsyncDisposable
                     type = "object",
                     properties = new Dictionary<string, object>
                     {
-                        ["element"] = new { type = "string", description = "Human-readable element description used to obtain permission to interact with the element" },
-                        ["ref"] = new { type = "string", description = "Exact target element reference from the page snapshot" },
+                        ["element"] = new { type = "string", description = ElementDescription },
+                        ["ref"] = new { type = "string", description = RefDescription },
                         ["values"] = new { type = "array", items = new { type = "string" }, description = "Array of values to select in the dropdown. This can be a single value or multiple values." }
                     },
                     required = new[] { "element", "ref", "values" }
@@ -1057,8 +1071,8 @@ public sealed class McpServer : IAsyncDisposable
                     type = "object",
                     properties = new Dictionary<string, object>
                     {
-                        ["element"] = new { type = "string", description = "Human-readable element description used to obtain permission to interact with the element" },
-                        ["ref"] = new { type = "string", description = "Exact target element reference from the page snapshot" }
+                        ["element"] = new { type = "string", description = ElementDescription },
+                        ["ref"] = new { type = "string", description = RefDescription }
                     },
                     required = new[] { "element", "ref" }
                 }
@@ -1103,8 +1117,8 @@ public sealed class McpServer : IAsyncDisposable
                     type = "object",
                     properties = new Dictionary<string, object>
                     {
-                        ["element"] = new { type = "string", description = "Human-readable element description used to obtain permission to screenshot the element. If not provided, the screenshot will be taken of viewport. If element is provided, ref must be provided too." },
-                        ["ref"] = new { type = "string", description = "Exact target element reference from the page snapshot. If not provided, the screenshot will be taken of viewport. If ref is provided, element must be provided too." },
+                        ["element"] = new { type = "string", description = $"{ElementDescription}. If not provided, the screenshot will be taken of viewport. If element is provided, ref must be provided too." },
+                        ["ref"] = new { type = "string", description = $"{RefDescription}. If not provided, the screenshot will be taken of viewport. If ref is provided, element must be provided too." },
                         ["fullPage"] = new { type = "boolean", description = "When true, takes a screenshot of the full scrollable page, instead of the currently visible viewport. Cannot be used with element screenshots." },
                         ["type"] = new { type = "string", description = "Image format for the screenshot. Default is png.", @enum = new[] { "png", "jpeg" } },
                         ["filename"] = new { type = "string", description = "File name to save the screenshot to. Defaults to returning base64 encoded data if not specified." }
@@ -1121,8 +1135,8 @@ public sealed class McpServer : IAsyncDisposable
                     type = "object",
                     properties = new Dictionary<string, object>
                     {
-                        ["element"] = new { type = "string", description = "Human-readable element description used to obtain permission to interact with the element" },
-                        ["ref"] = new { type = "string", description = "Exact target element reference from the page snapshot" },
+                        ["element"] = new { type = "string", description = ElementDescription },
+                        ["ref"] = new { type = "string", description = RefDescription },
                         ["function"] = new { type = "string", description = "() => { /* code */ } or (element) => { /* code */ } when element is provided" }
                     },
                     required = new[] { "function" }
