@@ -6,9 +6,10 @@ A lightweight Model Context Protocol (MCP) server for browser automation using M
 
 - **Pure .NET 8 Implementation**: No npm or Docker required
 - **Full Playwright Browser Support**: Chromium, Firefox, and WebKit
-- **MCP Protocol Compliant**: Works with any MCP-compatible client
+- **Dual Mode Operation**: Run as MCP server (stdin/stdout) or HTTP REST API server
 - **Comprehensive Browser Tools**: 21 browser automation tools for complete web interaction
 - **Command Line Configuration**: Easy startup with command-line arguments
+- **Agent-Friendly HTTP API**: Simple REST endpoints for easy integration with AI agents
 
 ## Requirements
 
@@ -35,7 +36,7 @@ dotnet run
 
 Before using the browser tools, you need to install the browser binaries. You can do this by:
 
-1. Using the `browser_install` tool via MCP
+1. Using the `browser_install` tool via MCP or HTTP API
 2. Or running the Playwright CLI:
    ```bash
    pwsh bin/Debug/net8.0/playwright.ps1 install
@@ -51,8 +52,36 @@ PlaywrightMcpServer [options]
 Options:
   --browser, -b <type>   Browser type: chromium, firefox, webkit (default: chromium)
   --headed               Run browser in headed mode (default: headless)
+  --http                 Run as HTTP server instead of MCP stdin/stdout mode
+  --port, -p <port>      HTTP server port (default: 5000, only used with --http)
   --help, -h             Show this help message
   --version, -v          Show version information
+```
+
+### Running Modes
+
+#### MCP Mode (Default)
+
+The default mode communicates via stdin/stdout using the MCP protocol, suitable for integration with MCP-compatible clients.
+
+```bash
+# Run in MCP mode
+dotnet run
+
+# With specific browser
+dotnet run -- --browser firefox
+```
+
+#### HTTP Server Mode
+
+The HTTP server mode provides a REST API that can be easily called by AI agents or any HTTP client.
+
+```bash
+# Start HTTP server on default port 5000
+dotnet run -- --http
+
+# Start on custom port with headed browser
+dotnet run -- --http --port 8080 --headed
 ```
 
 ### MCP Client Configuration
@@ -81,6 +110,101 @@ Or if you've published the executable:
     }
   }
 }
+```
+
+## HTTP API Reference
+
+When running in HTTP mode (`--http`), the following endpoints are available:
+
+### Health Check
+
+```http
+GET /health
+```
+
+Returns server health status.
+
+**Response:**
+```json
+{
+  "status": "healthy",
+  "version": "1.0.0"
+}
+```
+
+### List Tools
+
+```http
+GET /tools
+```
+
+Returns all available browser automation tools with their schemas.
+
+**Response:**
+```json
+{
+  "tools": [
+    {
+      "name": "browser_navigate",
+      "description": "Navigate to a URL",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "url": { "type": "string", "description": "The URL to navigate to" }
+        },
+        "required": ["url"]
+      }
+    },
+    ...
+  ]
+}
+```
+
+### Execute Tool
+
+```http
+POST /tools/{toolName}
+Content-Type: application/json
+```
+
+Execute a specific tool with the provided arguments.
+
+**Example - Navigate to URL:**
+```bash
+curl -X POST http://localhost:5000/tools/browser_navigate \
+     -H "Content-Type: application/json" \
+     -d '{"url": "https://example.com"}'
+```
+
+**Response:**
+```json
+{
+  "success": true,
+  "url": "https://example.com/",
+  "title": "Example Domain",
+  "status": 200
+}
+```
+
+**Example - Take Screenshot:**
+```bash
+curl -X POST http://localhost:5000/tools/browser_take_screenshot \
+     -H "Content-Type: application/json" \
+     -d '{"fullPage": true}'
+```
+
+**Example - Click Element:**
+```bash
+curl -X POST http://localhost:5000/tools/browser_click \
+     -H "Content-Type: application/json" \
+     -d '{"element": "Submit button", "ref": "button[type=\"submit\"]"}'
+```
+
+**Example - Get Accessibility Snapshot:**
+```bash
+curl -X POST http://localhost:5000/tools/browser_snapshot \
+     -H "Content-Type: application/json" \
+     -d '{}'
 ```
 
 ## Available Tools
@@ -117,6 +241,47 @@ The server provides the following browser automation tools:
 - **browser_resize** - Resize the browser viewport
 - **browser_close** - Close the current page
 - **browser_install** - Install browser binaries
+
+## Example Workflows
+
+### Web Scraping with HTTP API
+
+```bash
+# 1. Navigate to the page
+curl -X POST http://localhost:5000/tools/browser_navigate \
+     -H "Content-Type: application/json" \
+     -d '{"url": "https://example.com"}'
+
+# 2. Get accessibility snapshot
+curl -X POST http://localhost:5000/tools/browser_snapshot \
+     -H "Content-Type: application/json" \
+     -d '{}'
+
+# 3. Click a link
+curl -X POST http://localhost:5000/tools/browser_click \
+     -H "Content-Type: application/json" \
+     -d '{"element": "More information link", "ref": "a[href]"}'
+
+# 4. Take a screenshot
+curl -X POST http://localhost:5000/tools/browser_take_screenshot \
+     -H "Content-Type: application/json" \
+     -d '{"filename": "/tmp/screenshot.png"}'
+```
+
+### Form Filling
+
+```bash
+# Fill a login form
+curl -X POST http://localhost:5000/tools/browser_fill_form \
+     -H "Content-Type: application/json" \
+     -d '{
+       "fields": [
+         {"name": "username", "type": "textbox", "ref": "#username", "value": "user@example.com"},
+         {"name": "password", "type": "textbox", "ref": "#password", "value": "secretpass"},
+         {"name": "remember", "type": "checkbox", "ref": "#remember-me", "value": "true"}
+       ]
+     }'
+```
 
 ## Example MCP Interactions
 
@@ -176,13 +341,13 @@ dotnet publish -c Release -r osx-x64 --self-contained
 
 ## Architecture
 
-The server is implemented as a single console application that:
-1. Reads JSON-RPC messages from stdin
-2. Processes MCP protocol requests
-3. Executes Playwright browser automation commands
-4. Returns JSON-RPC responses to stdout
+The server is implemented with a clean separation of concerns:
 
-The implementation follows Microsoft C# coding conventions and is designed to be lightweight and easy to deploy.
+1. **BrowserAutomation** - Core browser automation logic using Playwright
+2. **McpServer** - MCP protocol handler for stdin/stdout communication
+3. **HttpServer** - REST API server using ASP.NET Core minimal APIs
+
+Both servers share the same `BrowserAutomation` class, ensuring consistent behavior regardless of the communication method.
 
 ## License
 
