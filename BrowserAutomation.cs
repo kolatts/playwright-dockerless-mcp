@@ -715,15 +715,15 @@ public sealed class BrowserAutomation : IAsyncDisposable
         }, s_jsonOptions);
     }
 
-    private static async Task<string> InstallBrowserAsync()
+    private static Task<string> InstallBrowserAsync()
     {
         var exitCode = Microsoft.Playwright.Program.Main(["install"]);
 
-        return JsonSerializer.Serialize(new
+        return Task.FromResult(JsonSerializer.Serialize(new
         {
             success = exitCode == 0,
             exitCode
-        }, s_jsonOptions);
+        }, s_jsonOptions));
     }
 
     public async ValueTask DisposeAsync()

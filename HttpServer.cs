@@ -36,14 +36,8 @@ public static class HttpServer
 
         var app = builder.Build();
 
-        // Create browser automation instance as a singleton
-        var browserAutomation = new BrowserAutomation(browserType, headless);
-
-        // Register cleanup on application shutdown
-        app.Lifetime.ApplicationStopping.Register(() =>
-        {
-            browserAutomation.DisposeAsync().AsTask().GetAwaiter().GetResult();
-        });
+        // Create browser automation instance as a singleton and ensure proper disposal
+        await using var browserAutomation = new BrowserAutomation(browserType, headless);
 
         // Health check endpoint
         app.MapGet("/health", () => Results.Ok(new { status = "healthy", version = "1.0.0" }));
